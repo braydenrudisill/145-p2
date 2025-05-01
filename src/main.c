@@ -3,33 +3,38 @@
 //
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdbool.h>
 #include <avr/io.h>
 #include <avr/interrupt.h>
+#include <avr/wdt.h>
 #include "utils.h"
 #include "lcd.h"
 
-const unsigned short OverflowsPerTick = XTAL_FRQ / 256;  // 31250.
+const unsigned short OverflowsPerTick = XTAL_FRQ / 256;
 volatile unsigned short OverflowCount = 0;
+volatile unsigned short EditIndex = 0;
+volatile unsigned char UnconfirmedEdits[14];
 
 typedef struct {
-    int year;
-    unsigned char month;
-    unsigned char day;
-    unsigned char hour;
-    unsigned char minute;
-    unsigned char second;
+    volatile int year;
+    volatile unsigned char month;
+    volatile unsigned char day;
+    volatile unsigned char hour;
+    volatile unsigned char minute;
+    volatile unsigned char second;
 } DateTime;
 
-DateTime DT;
+volatile DateTime* DT;
 
 void InitDT() {
-    DT.year = 2025;
-    DT.month = 0;
-    DT.day = 0;
-    DT.hour = 0;
-    DT.minute = 0;
-    DT.second = 0;
+    DT = (DateTime*) malloc(sizeof(DateTime));
+    DT->year = 2025;
+    DT->month = 0;
+    DT->day = 0;
+    DT->hour = 0;
+    DT->minute = 0;
+    DT->second = 0;
 }
 
 char* Months[12] = {
@@ -62,43 +67,12 @@ unsigned char DaysInMonths[12] = {
     31
 };
 
-inline bool year_div(unsigned short n) {
-    return DT.year % n == 0;
+bool year_div(const unsigned short n) {
+    return DT->year % n == 0;
 }
 
 bool IsLeapYear() {
     return (year_div(4) && !year_div(100)) || year_div(400);
-}
-
-void TickDT() {
-    ++DT.second;
-    if (DT.second >= 60) {
-        DT.second = 0;
-        ++DT.minute;
-    }
-    if (DT.minute >= 60) {
-        DT.minute = 0;
-        ++DT.hour;
-    }
-    if (DT.hour >= 24) {
-        DT.hour = 0;
-        ++DT.day;
-    }
-    if (DT.day >= DaysInMonths[DT.month] || (IsLeapYear() && DT.month == 1 && DT.day >= 29)) {
-        DT.day = 0;
-        ++DT.month;
-    }
-    if (DT.month >= 12) {
-        DT.month = 0;
-        ++DT.year;
-    }
-}
-
-ISR(TIMER0_OVF_vect) {
-    if (++OverflowCount >= OverflowsPerTick) {
-        TickDT();
-        OverflowCount = 0;
-    }
 }
 
 void TimerSet() {
@@ -108,19 +82,49 @@ void TimerSet() {
     sei();       // Global interrupt enable
 }
 
-void GetKey(unsigned const char index) {
+enum OP_States { OP_Edit, OP_Display } OP_State = OP_Display;
+enum CT_States { CT_AMPM, CT_24hr } CT_State = CT_24hr;
 
+void TickDT() {
+    // if (OP_State != OP_Display) return;
+    if (DT==NULL)
+        return;
+
+    ++DT->second;
+    if (DT->second >= 60) {
+        DT->second = 0;
+        ++DT->minute;
+    }
+    if (DT->minute >= 60) {
+        DT->minute = 0;
+        ++DT->hour;
+    }
+    if (DT->hour >= 24) {
+        DT->hour = 0;
+        ++DT->day;
+    }
+    if (DT->day >= DaysInMonths[DT->month] || (IsLeapYear() && DT->month == 1 && DT->day >= 29)) {
+        DT->day = 0;
+        ++DT->month;
+    }
+    if (DT->month >= 12) {
+        DT->month = 0;
+        ++DT->year;
+    }
 }
 
-enum OP_States { OP_Edit, OP_Display } OP_State;
-enum CT_States { CT_AMPM, CT_24hr } CT_State;
+ISR(TIMER0_OVF_vect) {
 
-void UpdateOperationMode() {
-
+    if (++OverflowCount >= OverflowsPerTick) {
+        TickDT();
+        OverflowCount = 0;
+    }
 }
 
+
+// PC is [r1, r2, r3, r4, c1, c2, c3, c4]
 bool IsPressed(const unsigned char row, const unsigned char column) {
-    const unsigned char column_port = column + 4;  // DDRC is [r1, r2, r3, r4, c1, c2, c3, c4]
+    const unsigned char column_port = column + 4;
     DDRC = 0x00;
     PORTC = 0x00;
 
@@ -149,30 +153,83 @@ void UpdateClockType() {
     }
 }
 
+void UpdateOperationMode() {
+    switch(OP_State) {
+        case OP_Display:
+            if (IsPressed(2, 3)) {
+                OP_State = OP_Edit;
+                EditIndex = 0;
+            }
+        break;
+        case OP_Edit:
+            if (IsPressed(3, 3) && EditIndex == 13) {
+                OP_State = OP_Display;
+                DT->year = 1000 * UnconfirmedEdits[0] + 100 * UnconfirmedEdits[1] + 10 * UnconfirmedEdits[2] + UnconfirmedEdits[3];
+                DT->month = 10 * UnconfirmedEdits[4] + UnconfirmedEdits[5];
+                DT->day = 10 * UnconfirmedEdits[6] + UnconfirmedEdits[7];
+                DT->hour = 10 * UnconfirmedEdits[8] + UnconfirmedEdits[9];
+                DT->minute = 10 * UnconfirmedEdits[10] + UnconfirmedEdits[11];
+                DT->second = 10 * UnconfirmedEdits[12] + UnconfirmedEdits[13];
+            }
+        break;
+    }
+}
+int GetNumberPressed() {
+    int r, c;
+    for (r = 0; r < 3; ++r)
+        for (c = 0; c < 3; ++c)
+            if (IsPressed(r, c))
+                return 3 * r + c + 1;
+
+    if (IsPressed(3, 2))
+        return 0;
+
+    return -1;
+}
+void HandleEdits() {
+    if (GetNumberPressed() != -1 && EditIndex < 14)
+        UnconfirmedEdits[EditIndex++] = GetNumberPressed();
+
+    // Check delete
+    else if (IsPressed(3, 2) && EditIndex > 0)
+        --EditIndex;
+}
+
 void UpdateDisplay() {
     char buf[17];
     // Print date on top row.
     lcd_pos(0, 0);
-    sprintf(buf, "%02d %s %04d", DT.day + 1, Months[DT.month], DT.year);
+    sprintf(buf, "%02d %s %04d", DT->day + 1, Months[DT->month], DT->year);
     lcd_puts2(buf);
     // Do similar thing to print time on bottom row.
 }
 
 void Update() {
-    UpdateOperationMode();
-    UpdateClockType();
-    UpdateDisplay();
-    if (IsPressed(0,0))
+    wdt_reset();
+    // UpdateOperationMode();
+    // UpdateClockType();
+    // if (OP_State == OP_Edit)
+    //     HandleEdits();
+    // UpdateDisplay();
+
+    // if (IsPressed(0,0))
+    //     SET_BIT(PORTB, 0);
+    // else
+    //     CLR_BIT(PORTB, 0);
+    DDRB = 0x03;
+
+    if (DT->second % 2 == 0)
         SET_BIT(PORTB, 0);
+    else
+        CLR_BIT(PORTB, 0);
 }
 
 int main(void) {
-    while(1) {
-        DDRB = 0xFF;
-        if (IsPressed(0, 0))
-            PORTB = 0x00;
-        else
-            PORTB = 0xFF;
-    }
+    avr_init();
+    // lcd_init();
+    wdt_disable();
+    InitDT();
+    TimerSet();
+    while(1) Update();
     return 0;
 }
