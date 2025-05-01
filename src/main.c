@@ -86,7 +86,8 @@ enum OP_States { OP_Edit, OP_Display } OP_State = OP_Display;
 enum CT_States { CT_AMPM, CT_24hr } CT_State = CT_24hr;
 
 void TickDT() {
-    // if (OP_State != OP_Display) return;
+    if (OP_State != OP_Display)
+        return;
     if (DT==NULL)
         return;
 
@@ -206,8 +207,8 @@ void UpdateDisplay() {
 
 void Update() {
     wdt_reset();
-    // UpdateOperationMode();
-    // UpdateClockType();
+    UpdateOperationMode();
+    UpdateClockType();
     // if (OP_State == OP_Edit)
     //     HandleEdits();
     // UpdateDisplay();
