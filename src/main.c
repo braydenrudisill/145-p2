@@ -14,7 +14,15 @@
 const unsigned short OverflowsPerTick = XTAL_FRQ / 256;
 volatile unsigned short OverflowCount = 0;
 volatile unsigned short EditIndex = 0;
-volatile unsigned char UnconfirmedEdits[14];
+volatile bool IsHoldingButton = false;
+volatile unsigned char UnconfirmedEdits[14] = {
+    0,0,0,0,  // Year
+    0,0,      // Month
+    0,0,      // Day
+    0,0,      // Hour
+    0,0,      // Minute
+    0,0       // Second
+};
 
 typedef struct {
     volatile int year;
@@ -92,26 +100,27 @@ void TickDT() {
         return;
 
     ++DT->second;
-    if (DT->second >= 60) {
-        DT->second = 0;
-        ++DT->minute;
-    }
-    if (DT->minute >= 60) {
-        DT->minute = 0;
-        ++DT->hour;
-    }
-    if (DT->hour >= 24) {
-        DT->hour = 0;
-        ++DT->day;
-    }
-    if (DT->day >= DaysInMonths[DT->month] || (IsLeapYear() && DT->month == 1 && DT->day >= 29)) {
-        DT->day = 0;
-        ++DT->month;
-    }
-    if (DT->month >= 12) {
-        DT->month = 0;
-        ++DT->year;
-    }
+    // if (DT->second >= 60) {
+    //     DT->second = 0;
+    //     ++DT->minute;
+    // }
+    // }
+    // if (DT->minute >= 60) {
+    //     DT->minute = 0;
+    //     ++DT->hour;
+    // }
+    // if (DT->hour >= 24) {
+    //     DT->hour = 0;
+    //     ++DT->day;
+    // }
+    // if (DT->day >= DaysInMonths[DT->month] || (IsLeapYear() && DT->month == 1 && DT->day >= 29)) {
+    //     DT->day = 0;
+    //     ++DT->month;
+    // }
+    // if (DT->month >= 12) {
+    //     DT->month = 0;
+    //     ++DT->year;
+    // }
 }
 
 ISR(TIMER0_OVF_vect) {
@@ -136,7 +145,6 @@ bool IsPressed(const unsigned char row, const unsigned char column) {
     CLR_BIT(DDRC, column_port);
     SET_BIT(PORTC, column_port);
 
-    avr_wait(5);
     // 000(1)_000(0)
     return GET_BIT(PINC, column_port) == 0;
 }
@@ -157,13 +165,17 @@ void UpdateClockType() {
 void UpdateOperationMode() {
     switch(OP_State) {
         case OP_Display:
+            if (DT->year == 2025)
+                SET_BIT(PORTB, 1);
+            else
+                CLR_BIT(PORTB, 1);
             if (IsPressed(2, 3)) {
                 OP_State = OP_Edit;
                 EditIndex = 0;
             }
         break;
         case OP_Edit:
-            if (IsPressed(3, 3) && EditIndex == 13) {
+            if (IsPressed(3, 3) && EditIndex==14) {
                 OP_State = OP_Display;
                 DT->year = 1000 * UnconfirmedEdits[0] + 100 * UnconfirmedEdits[1] + 10 * UnconfirmedEdits[2] + UnconfirmedEdits[3];
                 DT->month = 10 * UnconfirmedEdits[4] + UnconfirmedEdits[5];
@@ -182,18 +194,31 @@ int GetNumberPressed() {
             if (IsPressed(r, c))
                 return 3 * r + c + 1;
 
-    if (IsPressed(3, 2))
+    if (IsPressed(3, 1))
         return 0;
 
     return -1;
 }
 void HandleEdits() {
-    if (GetNumberPressed() != -1 && EditIndex < 14)
-        UnconfirmedEdits[EditIndex++] = GetNumberPressed();
+    if (EditIndex % 2 == 0)
+        CLR_BIT(PORTB, 1);
+    else
+        SET_BIT(PORTB, 1);
+
+    int n = GetNumberPressed();
+    if (n == -1) {
+        IsHoldingButton = false;
+        return;
+    }
+
+    if(!IsHoldingButton && EditIndex < 14) {
+        UnconfirmedEdits[EditIndex++] = n;
+        IsHoldingButton = true;
+    }
 
     // Check delete
-    else if (IsPressed(3, 2) && EditIndex > 0)
-        --EditIndex;
+    // else if (IsPressed(3, 2) && EditIndex > 0)
+    //     --EditIndex;
 }
 
 void UpdateDisplay() {
@@ -203,34 +228,43 @@ void UpdateDisplay() {
     sprintf(buf, "%02d %s %04d", DT->day + 1, Months[DT->month], DT->year);
     lcd_puts2(buf);
     // Do similar thing to print time on bottom row.
+    lcd_pos(1, 0);
+    sprintf(buf, "%02d:%02d:%02d", DT->hour + 1, DT->minute + 1, DT->second + 1);
+    lcd_puts2(buf);
 }
 
 void Update() {
-    wdt_reset();
     UpdateOperationMode();
-    UpdateClockType();
-    // if (OP_State == OP_Edit)
-    //     HandleEdits();
-    // UpdateDisplay();
+    // UpdateClockType();
+    if (OP_State == OP_Edit)
+        HandleEdits();
+    UpdateDisplay();
 
     // if (IsPressed(0,0))
     //     SET_BIT(PORTB, 0);
     // else
-    //     CLR_BIT(PORTB, 0);
-    DDRB = 0x03;
 
-    if (DT->second % 2 == 0)
-        SET_BIT(PORTB, 0);
-    else
-        CLR_BIT(PORTB, 0);
+    //     CLR_BIT(PORTB, 0);
+    // if (DT->second % 2 == 0)
+    //     SET_BIT(PORTB, 0);
+    // else
+    //     CLR_BIT(PORTB, 0);
+
+    // lcd_clr();
+
+    // avr_wait();
+
 }
 
 int main(void) {
     avr_init();
-    // lcd_init();
-    wdt_disable();
+    // wdt_reset();
+    // wdt_disable();
+    lcd_init();
     InitDT();
     TimerSet();
+    // lcd_clr();
+
     while(1) Update();
     return 0;
 }

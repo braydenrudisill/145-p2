@@ -64,8 +64,7 @@ write(unsigned char c, unsigned char rs)
   output(c, rs);
 }
 
-void
-lcd_init(void)
+void lcd_init(void)
 {
   SET_BIT(DDR, RS_PIN);
   SET_BIT(DDR, RW_PIN);
