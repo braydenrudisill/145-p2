@@ -11,7 +11,7 @@
 #include "utils.h"
 #include "lcd.h"
 
-const unsigned short OverflowsPerTick = XTAL_FRQ / 256;
+const unsigned short OverflowsPerTick = XTAL_FRQ / 256 / 256;
 volatile unsigned short OverflowCount = 0;
 volatile unsigned short EditIndex = 0;
 volatile bool IsHoldingButton = false;
@@ -84,7 +84,7 @@ bool IsLeapYear() {
 }
 
 void TimerSet() {
-    TCCR0 = 1;   // Disable prescaling
+    TCCR0 = 4;   // Disable prescaling
     TCNT0 = 0;   // Set initial count to 0
     TIMSK |= 1;  // Timer0 overflow interrupt enable
     sei();       // Global interrupt enable
@@ -100,31 +100,29 @@ void TickDT() {
         return;
 
     ++DT->second;
-    // if (DT->second >= 60) {
-    //     DT->second = 0;
-    //     ++DT->minute;
-    // }
-    // }
-    // if (DT->minute >= 60) {
-    //     DT->minute = 0;
-    //     ++DT->hour;
-    // }
-    // if (DT->hour >= 24) {
-    //     DT->hour = 0;
-    //     ++DT->day;
-    // }
-    // if (DT->day >= DaysInMonths[DT->month] || (IsLeapYear() && DT->month == 1 && DT->day >= 29)) {
-    //     DT->day = 0;
-    //     ++DT->month;
-    // }
-    // if (DT->month >= 12) {
-    //     DT->month = 0;
-    //     ++DT->year;
-    // }
+    if (DT->second >= 60) {
+        DT->second = 0;
+        ++DT->minute;
+    }
+    if (DT->minute >= 60) {
+        DT->minute = 0;
+        ++DT->hour;
+    }
+    if (DT->hour >= 24) {
+        DT->hour = 0;
+        ++DT->day;
+    }
+    if (DT->day >= DaysInMonths[DT->month] || (IsLeapYear() && DT->month == 1 && DT->day >= 29)) {
+        DT->day = 0;
+        ++DT->month;
+    }
+    if (DT->month >= 12) {
+        DT->month = 0;
+        ++DT->year;
+    }
 }
 
 ISR(TIMER0_OVF_vect) {
-
     if (++OverflowCount >= OverflowsPerTick) {
         TickDT();
         OverflowCount = 0;
@@ -165,10 +163,8 @@ void UpdateClockType() {
 void UpdateOperationMode() {
     switch(OP_State) {
         case OP_Display:
-            if (DT->year == 2025)
-                SET_BIT(PORTB, 1);
-            else
-                CLR_BIT(PORTB, 1);
+            SET_BIT(DDRB, 4);
+            CLR_BIT(PORTB, 4);
             if (IsPressed(2, 3)) {
                 OP_State = OP_Edit;
                 EditIndex = 0;
@@ -200,10 +196,11 @@ int GetNumberPressed() {
     return -1;
 }
 void HandleEdits() {
+    SET_BIT(DDRB, 4);
     if (EditIndex % 2 == 0)
-        CLR_BIT(PORTB, 1);
+        SET_BIT(PORTB, 4);
     else
-        SET_BIT(PORTB, 1);
+        CLR_BIT(PORTB, 4);
 
     int n = GetNumberPressed();
     if (n == -1) {
@@ -225,15 +222,16 @@ void UpdateDisplay() {
     char buf[17];
     // Print date on top row.
     lcd_pos(0, 0);
-    sprintf(buf, "%02d %s %04d", DT->day + 1, Months[DT->month], DT->year);
+    sprintf(buf, "%02d/%02d/%04d      ", DT->month + 1, DT->day + 1, DT->year);
     lcd_puts2(buf);
     // Do similar thing to print time on bottom row.
     lcd_pos(1, 0);
-    sprintf(buf, "%02d:%02d:%02d", DT->hour + 1, DT->minute + 1, DT->second + 1);
+    sprintf(buf, "%02d:%02d:%02d      ", DT->hour, DT->minute, DT->second);
     lcd_puts2(buf);
 }
 
 void Update() {
+    wdt_reset();
     UpdateOperationMode();
     // UpdateClockType();
     if (OP_State == OP_Edit)
@@ -245,15 +243,15 @@ void Update() {
     // else
 
     //     CLR_BIT(PORTB, 0);
+    // SET_BIT(DDRB, 4);
     // if (DT->second % 2 == 0)
-    //     SET_BIT(PORTB, 0);
+    //     SET_BIT(PORTB, 4);
     // else
-    //     CLR_BIT(PORTB, 0);
+    //     CLR_BIT(PORTB, 4);
 
     // lcd_clr();
-
-    // avr_wait();
-
+    // TickDT();
+    // avr_wait(1000);
 }
 
 int main(void) {
