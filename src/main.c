@@ -112,7 +112,7 @@ void TickDT() {
         DT->hour = 0;
         ++DT->day;
     }
-    if (DT->day >= DaysInMonths[DT->month] || (IsLeapYear() && DT->month == 1 && DT->day >= 29)) {
+    if ((IsLeapYear() && DT->month == 1 && DT->day >= 29) || ((!IsLeapYear() || DT->month != 1) && DT->day >= DaysInMonths[DT->month])) {
         DT->day = 0;
         ++DT->month;
     }
@@ -143,6 +143,9 @@ bool IsPressed(const unsigned char row, const unsigned char column) {
     CLR_BIT(DDRC, column_port);
     SET_BIT(PORTC, column_port);
 
+    for (int i = 0; i < 2000; ++i)
+        NOP();
+
     // 000(1)_000(0)
     return GET_BIT(PINC, column_port) == 0;
 }
@@ -163,19 +166,18 @@ void UpdateClockType() {
 void UpdateOperationMode() {
     switch(OP_State) {
         case OP_Display:
-            SET_BIT(DDRB, 4);
-            CLR_BIT(PORTB, 4);
             if (IsPressed(2, 3)) {
                 OP_State = OP_Edit;
+                lcd_clr();
                 EditIndex = 0;
             }
         break;
         case OP_Edit:
             if (IsPressed(3, 3) && EditIndex==14) {
                 OP_State = OP_Display;
-                DT->year = 1000 * UnconfirmedEdits[0] + 100 * UnconfirmedEdits[1] + 10 * UnconfirmedEdits[2] + UnconfirmedEdits[3];
-                DT->month = 10 * UnconfirmedEdits[4] + UnconfirmedEdits[5];
-                DT->day = 10 * UnconfirmedEdits[6] + UnconfirmedEdits[7];
+                DT->month = 10 * UnconfirmedEdits[0] + UnconfirmedEdits[1] - 1;
+                DT->day = 10 * UnconfirmedEdits[2] + UnconfirmedEdits[3] - 1;
+                DT->year = 1000 * UnconfirmedEdits[4] + 100 * UnconfirmedEdits[5] + 10 * UnconfirmedEdits[6] + UnconfirmedEdits[7];
                 DT->hour = 10 * UnconfirmedEdits[8] + UnconfirmedEdits[9];
                 DT->minute = 10 * UnconfirmedEdits[10] + UnconfirmedEdits[11];
                 DT->second = 10 * UnconfirmedEdits[12] + UnconfirmedEdits[13];
@@ -185,13 +187,13 @@ void UpdateOperationMode() {
 }
 int GetNumberPressed() {
     int r, c;
+    if (IsPressed(3, 1))
+        return 0;
+
     for (r = 0; r < 3; ++r)
         for (c = 0; c < 3; ++c)
             if (IsPressed(r, c))
                 return 3 * r + c + 1;
-
-    if (IsPressed(3, 1))
-        return 0;
 
     return -1;
 }
@@ -203,6 +205,7 @@ void HandleEdits() {
         CLR_BIT(PORTB, 4);
 
     int n = GetNumberPressed();
+
     if (n == -1) {
         IsHoldingButton = false;
         return;
@@ -211,57 +214,52 @@ void HandleEdits() {
     if(!IsHoldingButton && EditIndex < 14) {
         UnconfirmedEdits[EditIndex++] = n;
         IsHoldingButton = true;
+        lcd_pos(0,0);
+        for (int i = 0; i < EditIndex; ++i) {
+            char buf[1];
+            sprintf(buf, "%1d", UnconfirmedEdits[i]);
+            lcd_puts2(buf);
+        }
     }
 
-    // Check delete
-    // else if (IsPressed(3, 2) && EditIndex > 0)
-    //     --EditIndex;
 }
 
 void UpdateDisplay() {
     char buf[17];
+
     // Print date on top row.
     lcd_pos(0, 0);
     sprintf(buf, "%02d/%02d/%04d      ", DT->month + 1, DT->day + 1, DT->year);
     lcd_puts2(buf);
+
     // Do similar thing to print time on bottom row.
-    lcd_pos(1, 0);
-    sprintf(buf, "%02d:%02d:%02d      ", DT->hour, DT->minute, DT->second);
-    lcd_puts2(buf);
+    if (CT_State == CT_24hr) {
+        lcd_pos(1, 0);
+        sprintf(buf, "%02d:%02d:%02d      ", DT->hour, DT->minute, DT->second);
+        lcd_puts2(buf);
+    }
+    else {
+        lcd_pos(1, 0);
+        sprintf(buf, "%02d:%02d:%02d %s", DT->hour == 0 ? 12 : ((char) DT->hour - 1) % 12 + 1, DT->minute, DT->second, DT->hour < 12 ? "AM" : "PM");
+        lcd_puts2(buf);
+    }
 }
 
 void Update() {
     wdt_reset();
     UpdateOperationMode();
-    // UpdateClockType();
+    UpdateClockType();
     if (OP_State == OP_Edit)
         HandleEdits();
-    UpdateDisplay();
-
-    // if (IsPressed(0,0))
-    //     SET_BIT(PORTB, 0);
-    // else
-
-    //     CLR_BIT(PORTB, 0);
-    // SET_BIT(DDRB, 4);
-    // if (DT->second % 2 == 0)
-    //     SET_BIT(PORTB, 4);
-    // else
-    //     CLR_BIT(PORTB, 4);
-
-    // lcd_clr();
-    // TickDT();
-    // avr_wait(1000);
+    else if (OP_State == OP_Display)
+        UpdateDisplay();
 }
 
 int main(void) {
     avr_init();
-    // wdt_reset();
-    // wdt_disable();
     lcd_init();
     InitDT();
     TimerSet();
-    // lcd_clr();
 
     while(1) Update();
     return 0;
