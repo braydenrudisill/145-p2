@@ -6,9 +6,9 @@
 
 #define DDR    DDRB
 #define PORT   PORTB
-#define RS_PIN 0
-#define RW_PIN 1
-#define EN_PIN 2
+#define RS_PIN 1
+#define RW_PIN 2
+#define EN_PIN 3
 
 static inline void
 set_data(unsigned char x)

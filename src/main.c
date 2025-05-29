@@ -100,45 +100,28 @@ void PlayNextNote() {
 }
 
 void Update() {
-    wdt_reset();
-    SET_BIT(DDRC, 0);
-    CLR_BIT(DDRC, 1);
-    SET_BIT(DDRC, 5);
+}
 
-    if (State == Playing) {
-        CLR_BIT(PORTC, 5);
-        if (!IsPressed && GET_BIT(PINC, 1)) {
-            State = Paused;
-            IsPressed = true;
-        }
-        else
-            PlayNextNote();
-    }
-    if (State == Paused) {
-        SET_BIT(PORTC, 5);
-        if (!IsPressed && GET_BIT(PINC, 1)) {
-            CurrentNote = 0;
-            State = Playing;
-            IsPressed = true;
-        }
-    }
-    if (IsPressed && !GET_BIT(PINC, 1))
-        IsPressed = false;
+int get_sample() {
+    ADMUX = 0b01000000;
+    ADCSRA = 0b11000000;
+    while (GET_BIT(ADCSRA, 6));
+    int adcl = ADCL;
+    int adch = ADCH;
+
+    return adcl | (adch << 8);
 }
 
 int main(void) {
-    State = Paused;
-    IsPressed = false;
-    CurrentNote = 0;
+    char buf[20];
     avr_init();
     lcd_init();
-    lcd_clr();
-    lcd_pos(0,0);
-    lcd_puts2("Marry had a litt");
-    lcd_pos(1,0);
-    lcd_puts2("le lamb!");
-    // InitDT();
-    // TimerSet();
-    while(1) Update();
+    while(1) {
+        wdt_reset();
+        sprintf(buf, "%d        ", get_sample());
+        lcd_pos(0, 0);
+        lcd_puts2(buf);
+        avr_wait(500);
+    }
     return 0;
 }
