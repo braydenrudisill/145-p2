@@ -35,6 +35,7 @@ typedef struct {
 
 volatile DateTime* DT;
 volatile DateTime* Alarm;
+volatile DateTime* CountdownTimer;
 
 void InitDT() {
     DT = (DateTime*) malloc(sizeof(DateTime));
@@ -102,8 +103,35 @@ enum OP_States { OP_Edit, OP_Display, OP_EditAlarm, OP_Timer } OP_State = OP_Dis
 enum CT_States { CT_AMPM, CT_24hr } CT_State = CT_24hr;
 
 void TickDT() {
-    if (OP_State != OP_Display)
+
+    if (OP_State == OP_Timer) {
+        --CountdownTimer->second;
+        if (CountdownTimer->second < 0) {
+            CountdownTimer->second = 59;
+            --CountdownTimer->minute;
+        }
+        if (CountdownTimer->minute < 0) {
+            CountdownTimer->minute = 59;
+            --CountdownTimer->hour;
+        }
+        if (CountdownTimer->hour < 0) {
+            CountdownTimer->hour = 23;
+            --CountdownTimer->day;
+        }
+        if (CountdownTimer->day < 0) {
+            --CountdownTimer->month;
+            if (CountdownTimer->month - 1 < 0)
+                CountdownTimer->day = DaysInMonths[11];
+            else
+                CountdownTimer->day = DaysInMonths[CountdownTimer->month - 1];
+        }
+
+    }
+
+
+    else if (OP_State != OP_Display)
         return;
+
     if (DT==NULL)
         return;
 
@@ -193,7 +221,18 @@ void UpdateOperationMode() {
             }
         break;
 
+        case OP_EditTimer:
+            if (IsPressed(3, 3) && EditIndex==14) {
+                OP_State = OP_Display;
+                CountdownTimer->month = 10 * UnconfirmedEdits[0] + UnconfirmedEdits[1] - 1;
+                CountdownTimer->day = 10 * UnconfirmedEdits[2] + UnconfirmedEdits[3] - 1;
+                CountdownTimer->year = 1000 * UnconfirmedEdits[4] + 100 * UnconfirmedEdits[5] + 10 * UnconfirmedEdits[6] + UnconfirmedEdits[7];
+                CountdownTimer->hour = 10 * UnconfirmedEdits[8] + UnconfirmedEdits[9];
+                CountdownTimer->minute = 10 * UnconfirmedEdits[10] + UnconfirmedEdits[11];
+                CountdownTimer->second = 10 * UnconfirmedEdits[12] + UnconfirmedEdits[13];
+            }
         case OP_Timer:
+
         break;
     }
 }
