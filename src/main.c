@@ -247,19 +247,25 @@ void UpdateDisplay() {
 
 void Update() {
     wdt_reset();
-    UpdateOperationMode();
-    UpdateClockType();
-    if (OP_State == OP_Edit)
-        HandleEdits();
-    else if (OP_State == OP_Display)
-        UpdateDisplay();
+    lcd_pos(1, 1);
+    lcd_puts2("hiii!  ");
+    SET_BIT(DDRB, 4);
+    SET_BIT(PORTB, 4);
+    // UpdateOperationMode();
+    // UpdateClockType();
+    // if (OP_State == OP_Edit)
+    //     HandleEdits();
+    // else if (OP_State == OP_Display)
+    //     UpdateDisplay();
 }
 
 int main(void) {
     avr_init();
     lcd_init();
-    InitDT();
-    TimerSet();
+    // lcd_pos(1, 1);
+    // lcd_puts2("hiii!  ");
+    // InitDT();
+    // TimerSet();
 
     while(1) Update();
     return 0;
