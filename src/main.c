@@ -242,7 +242,17 @@ bool ShouldAlarm() {
         Alarm->day == DT->day &&
         Alarm->hour == DT->hour &&
         Alarm->minute == DT->minute &&
-        Alarm->second -5 < DT->second);
+        Alarm->second < DT->second && Alarm->second + 5 > DT->second);
+}
+
+void TickAlarm() {
+    SET_BIT(DDRA, 0);
+    SET_BIT(PORTA, 0);
+    for (int i = 0; i < 1000; ++i)
+        NOP();
+    CLR_BIT(PORTA, 0);
+    for (int i = 0; i < 1000; ++i)
+        NOP();
 }
 
 void UpdateDisplay() {
