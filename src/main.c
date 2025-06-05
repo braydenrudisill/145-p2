@@ -34,6 +34,7 @@ typedef struct {
 } DateTime;
 
 volatile DateTime* DT;
+volatile DateTime* Alarm;
 
 void InitDT() {
     DT = (DateTime*) malloc(sizeof(DateTime));
@@ -43,6 +44,13 @@ void InitDT() {
     DT->hour = 0;
     DT->minute = 0;
     DT->second = 0;
+    Alarm = (DateTime*) malloc(sizeof(DateTime));
+    Alarm->year = 0;
+    Alarm->month = 0;
+    Alarm->day = 0;
+    Alarm->hour = 0;
+    Alarm->minute = 0;
+    Alarm->second = 0;
 }
 
 char* Months[12] = {
@@ -90,7 +98,7 @@ void TimerSet() {
     sei();       // Global interrupt enable
 }
 
-enum OP_States { OP_Edit, OP_Display } OP_State = OP_Display;
+enum OP_States { OP_Edit, OP_Display, OP_EditAlarm, OP_Timer } OP_State = OP_Display;
 enum CT_States { CT_AMPM, CT_24hr } CT_State = CT_24hr;
 
 void TickDT() {
@@ -129,7 +137,6 @@ ISR(TIMER0_OVF_vect) {
     }
 }
 
-
 // PC is [r1, r2, r3, r4, c1, c2, c3, c4]
 bool IsPressed(const unsigned char row, const unsigned char column) {
     const unsigned char column_port = column + 4;
@@ -150,19 +157,6 @@ bool IsPressed(const unsigned char row, const unsigned char column) {
     return GET_BIT(PINC, column_port) == 0;
 }
 
-void UpdateClockType() {
-    switch(CT_State) {
-        case CT_AMPM:
-            if (IsPressed(0, 3))
-                 CT_State = CT_24hr;
-            break;
-        case CT_24hr:
-            if (IsPressed(1, 3))
-                CT_State = CT_AMPM;
-            break;
-    }
-}
-
 void UpdateOperationMode() {
     switch(OP_State) {
         case OP_Display:
@@ -171,7 +165,11 @@ void UpdateOperationMode() {
                 lcd_clr();
                 EditIndex = 0;
             }
-        break;
+            if (IsPressed(1, 3)) {
+                OP_State = OP_EditAlarm;
+                lcd_clr();
+            }
+            break;
         case OP_Edit:
             if (IsPressed(3, 3) && EditIndex==14) {
                 OP_State = OP_Display;
@@ -182,6 +180,20 @@ void UpdateOperationMode() {
                 DT->minute = 10 * UnconfirmedEdits[10] + UnconfirmedEdits[11];
                 DT->second = 10 * UnconfirmedEdits[12] + UnconfirmedEdits[13];
             }
+            break;
+        case OP_EditAlarm:
+            if (IsPressed(3, 3) && EditIndex==14) {
+                OP_State = OP_Display;
+                Alarm->month = 10 * UnconfirmedEdits[0] + UnconfirmedEdits[1] - 1;
+                Alarm->day = 10 * UnconfirmedEdits[2] + UnconfirmedEdits[3] - 1;
+                Alarm->year = 1000 * UnconfirmedEdits[4] + 100 * UnconfirmedEdits[5] + 10 * UnconfirmedEdits[6] + UnconfirmedEdits[7];
+                Alarm->hour = 10 * UnconfirmedEdits[8] + UnconfirmedEdits[9];
+                Alarm->minute = 10 * UnconfirmedEdits[10] + UnconfirmedEdits[11];
+                Alarm->second = 10 * UnconfirmedEdits[12] + UnconfirmedEdits[13];
+            }
+        break;
+
+        case OP_Timer:
         break;
     }
 }
@@ -221,12 +233,20 @@ void HandleEdits() {
             lcd_puts2(buf);
         }
     }
+}
 
+bool ShouldAlarm() {
+    return (
+        Alarm->year == DT->year &&
+        Alarm->month == DT->month &&
+        Alarm->day == DT->day &&
+        Alarm->hour == DT->hour &&
+        Alarm->minute == DT->minute &&
+        Alarm->second -5 < DT->second);
 }
 
 void UpdateDisplay() {
     char buf[17];
-
     // Print date on top row.
     lcd_pos(0, 0);
     sprintf(buf, "%02d/%02d/%04d      ", DT->month + 1, DT->day + 1, DT->year);
@@ -247,25 +267,21 @@ void UpdateDisplay() {
 
 void Update() {
     wdt_reset();
-    lcd_pos(1, 1);
-    lcd_puts2("hiii!  ");
-    SET_BIT(DDRB, 4);
-    SET_BIT(PORTB, 4);
-    // UpdateOperationMode();
-    // UpdateClockType();
-    // if (OP_State == OP_Edit)
-    //     HandleEdits();
-    // else if (OP_State == OP_Display)
-    //     UpdateDisplay();
+    UpdateOperationMode();
+    if (OP_State == OP_Edit || OP_State == OP_EditAlarm)
+        HandleEdits();
+    else if (OP_State == OP_Display)
+        UpdateDisplay();
+
+    if (ShouldAlarm())
+        TickAlarm();
 }
 
 int main(void) {
     avr_init();
     lcd_init();
-    // lcd_pos(1, 1);
-    // lcd_puts2("hiii!  ");
-    // InitDT();
-    // TimerSet();
+    InitDT();
+    TimerSet();
 
     while(1) Update();
     return 0;
