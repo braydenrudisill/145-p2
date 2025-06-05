@@ -101,6 +101,12 @@ void TimerSet() {
 enum OP_States { OP_Edit, OP_Display, OP_EditAlarm, OP_Timer } OP_State = OP_Display;
 enum CT_States { CT_AMPM, CT_24hr } CT_State = CT_24hr;
 
+enum TimeZone { TZ_PST, TZ_EST, TZ_UTC };
+enum TimeZone CurrentTZ = TZ_PST;
+
+const char* TimeZoneNames[] = { "PST", "EST", "UTC" };
+const char TimeZoneOffsets[] = { 0, +3, +8 };
+
 void TickDT() {
     if (OP_State != OP_Display)
         return;
@@ -245,28 +251,38 @@ bool ShouldAlarm() {
         Alarm->second -5 < DT->second);
 }
 
+void ToggleTimeZone() {
+    bool togglePressed = false;  // replace with real check
+
+    if (togglePressed) {
+        CurrentTZ = (CurrentTZ + 1) % 3;
+        lcd_clr();
+    }
+}
+
 void UpdateDisplay() {
     char buf[17];
-    // Print date on top row.
+    int tz_hour = (DT->hour + TimeZoneOffsets[CurrentTZ]) % 24;
+
+    // Display date + timezone
     lcd_pos(0, 0);
-    sprintf(buf, "%02d/%02d/%04d      ", DT->month + 1, DT->day + 1, DT->year);
+    sprintf(buf, "%02d/%02d/%04d %s", DT->month + 1, DT->day + 1, DT->year, TimeZoneNames[CurrentTZ]);
     lcd_puts2(buf);
 
-    // Do similar thing to print time on bottom row.
+    // Display time in 24hr or 12hr format
+    lcd_pos(1, 0);
     if (CT_State == CT_24hr) {
-        lcd_pos(1, 0);
-        sprintf(buf, "%02d:%02d:%02d      ", DT->hour, DT->minute, DT->second);
-        lcd_puts2(buf);
+        sprintf(buf, "%02d:%02d:%02d      ", tz_hour, DT->minute, DT->second);
+    } else {
+        unsigned char hr = tz_hour == 0 ? 12 : ((tz_hour - 1) % 12) + 1;
+        sprintf(buf, "%02d:%02d:%02d %s", hr, DT->minute, DT->second, tz_hour < 12 ? "AM" : "PM");
     }
-    else {
-        lcd_pos(1, 0);
-        sprintf(buf, "%02d:%02d:%02d %s", DT->hour == 0 ? 12 : ((char) DT->hour - 1) % 12 + 1, DT->minute, DT->second, DT->hour < 12 ? "AM" : "PM");
-        lcd_puts2(buf);
-    }
+    lcd_puts2(buf);
 }
 
 void Update() {
     wdt_reset();
+    ToggleTimeZone();
     UpdateOperationMode();
     if (OP_State == OP_Edit || OP_State == OP_EditAlarm)
         HandleEdits();
