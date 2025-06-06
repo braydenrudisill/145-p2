@@ -15,6 +15,7 @@ const unsigned short OverflowsPerTick = XTAL_FRQ / 256 / 256;
 volatile unsigned short OverflowCount = 0;
 volatile unsigned short EditIndex = 0;
 volatile bool IsHoldingButton = false;
+volatile bool IsHoldingTZButton = false;
 volatile unsigned char UnconfirmedEdits[14] = {
     0,0,0,0,  // Year
     0,0,      // Month
@@ -26,16 +27,17 @@ volatile unsigned char UnconfirmedEdits[14] = {
 
 typedef struct {
     volatile int year;
-    volatile unsigned char month;
-    volatile unsigned char day;
-    volatile unsigned char hour;
-    volatile unsigned char minute;
-    volatile unsigned char second;
+    volatile char month;
+    volatile char day;
+    volatile char hour;
+    volatile char minute;
+    volatile char second;
 } DateTime;
 
 volatile DateTime* DT;
 volatile DateTime* Alarm;
 volatile DateTime* CountdownTimer;
+volatile int ALARMING = 0;
 
 void InitDT() {
     DT = (DateTime*) malloc(sizeof(DateTime));
@@ -99,7 +101,7 @@ void TimerSet() {
     sei();       // Global interrupt enable
 }
 
-enum OP_States { OP_Edit, OP_Display, OP_EditAlarm, OP_Timer } OP_State = OP_Display;
+enum OP_States { OP_Edit, OP_Display, OP_EditAlarm, OP_Timer, OP_EditTimer } OP_State = OP_Display;
 enum CT_States { CT_AMPM, CT_24hr } CT_State = CT_24hr;
 
 enum TimeZone { TZ_PST, TZ_EST, TZ_UTC };
@@ -111,6 +113,13 @@ const char TimeZoneOffsets[] = { 0, +3, +8 };
 void TickDT() {
 
     if (OP_State == OP_Timer) {
+        if (ALARMING == 1) {
+            OP_State = OP_Display;
+            ALARMING = 0;
+        }
+        if (ALARMING > 1)
+            --ALARMING;
+
         --CountdownTimer->second;
         if (CountdownTimer->second < 0) {
             CountdownTimer->second = 59;
@@ -122,20 +131,13 @@ void TickDT() {
         }
         if (CountdownTimer->hour < 0) {
             CountdownTimer->hour = 23;
-            --CountdownTimer->day;
+            ALARMING = 4;
         }
-        if (CountdownTimer->day < 0) {
-            --CountdownTimer->month;
-            if (CountdownTimer->month - 1 < 0)
-                CountdownTimer->day = DaysInMonths[11];
-            else
-                CountdownTimer->day = DaysInMonths[CountdownTimer->month - 1];
-        }
-
+        return;
     }
 
 
-    else if (OP_State != OP_Display)
+    if (OP_State != OP_Display)
         return;
 
     if (DT==NULL)
@@ -203,6 +205,10 @@ void UpdateOperationMode() {
                 OP_State = OP_EditAlarm;
                 lcd_clr();
             }
+            if (IsPressed(0, 3)) {
+                OP_State = OP_EditTimer;
+                lcd_clr();
+            }
             break;
         case OP_Edit:
             if (IsPressed(3, 3) && EditIndex==14) {
@@ -229,7 +235,7 @@ void UpdateOperationMode() {
 
         case OP_EditTimer:
             if (IsPressed(3, 3) && EditIndex==14) {
-                OP_State = OP_Display;
+                OP_State = OP_Timer;
                 CountdownTimer->month = 10 * UnconfirmedEdits[0] + UnconfirmedEdits[1] - 1;
                 CountdownTimer->day = 10 * UnconfirmedEdits[2] + UnconfirmedEdits[3] - 1;
                 CountdownTimer->year = 1000 * UnconfirmedEdits[4] + 100 * UnconfirmedEdits[5] + 10 * UnconfirmedEdits[6] + UnconfirmedEdits[7];
@@ -237,10 +243,15 @@ void UpdateOperationMode() {
                 CountdownTimer->minute = 10 * UnconfirmedEdits[10] + UnconfirmedEdits[11];
                 CountdownTimer->second = 10 * UnconfirmedEdits[12] + UnconfirmedEdits[13];
             }
+        break;
         case OP_Timer:
-
+            // if (CountdownTimer->year < 0 && CountdownTimer->second < 55) {
+            //     OP_State = OP_Display;
+            //     CountdownTimer->year = 0;
+            // }
         break;
     }
+
 }
 int GetNumberPressed() {
     int r, c;
@@ -255,12 +266,6 @@ int GetNumberPressed() {
     return -1;
 }
 void HandleEdits() {
-    SET_BIT(DDRB, 4);
-    if (EditIndex % 2 == 0)
-        SET_BIT(PORTB, 4);
-    else
-        CLR_BIT(PORTB, 4);
-
     int n = GetNumberPressed();
 
     if (n == -1) {
@@ -281,7 +286,7 @@ void HandleEdits() {
 }
 
 bool ShouldAlarm() {
-    return (
+    return (ALARMING) || (
         Alarm->year == DT->year &&
         Alarm->month == DT->month &&
         Alarm->day == DT->day &&
@@ -301,12 +306,14 @@ void TickAlarm() {
 }
 
 void ToggleTimeZone() {
-    bool togglePressed = false;  // replace with real check
-
-    if (togglePressed) {
+    if (!IsHoldingTZButton && IsPressed(3, 0)) {
+        IsHoldingTZButton = true;
         CurrentTZ = (CurrentTZ + 1) % 3;
         lcd_clr();
     }
+
+    if (IsHoldingTZButton && !IsPressed(3, 0))
+        IsHoldingTZButton = false;
 }
 
 void UpdateDisplay() {
@@ -315,7 +322,7 @@ void UpdateDisplay() {
 
     // Display date + timezone
     lcd_pos(0, 0);
-    sprintf(buf, "%02d/%02d/%04d %s", DT->month + 1, DT->day + 1, DT->year, TimeZoneNames[CurrentTZ]);
+    sprintf(buf, "%s              ", TimeZoneNames[CurrentTZ]);
     lcd_puts2(buf);
 
     // Display time in 24hr or 12hr format
@@ -329,15 +336,34 @@ void UpdateDisplay() {
     lcd_puts2(buf);
 }
 
+void UpdateTimerDisplay() {
+    char buf[17];
+
+    // Display date + timezone
+    lcd_pos(0, 0);
+    sprintf(buf, "TIMER       ");
+    lcd_puts2(buf);
+
+    // Display time in 24hr or 12hr format
+    lcd_pos(1, 0);
+    if (CT_State == CT_24hr) {
+        sprintf(buf, "%02d:%02d:%02d     ", CountdownTimer->hour, CountdownTimer->minute, CountdownTimer->second);
+    } else {
+        sprintf(buf, "%02d:%02d:%02d %s", CountdownTimer->hour, CountdownTimer->minute, CountdownTimer->second, CountdownTimer->hour < 12 ? "AM" : "PM");
+    }
+    lcd_puts2(buf);
+}
+
 void Update() {
     wdt_reset();
     ToggleTimeZone();
     UpdateOperationMode();
-    if (OP_State == OP_Edit || OP_State == OP_EditAlarm)
+    if (OP_State == OP_Edit || OP_State == OP_EditAlarm || OP_State == OP_EditTimer)
         HandleEdits();
     else if (OP_State == OP_Display)
         UpdateDisplay();
-
+    else if (OP_State == OP_Timer)
+        UpdateTimerDisplay();
     if (ShouldAlarm())
         TickAlarm();
 }
